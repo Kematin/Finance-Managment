@@ -61,9 +61,18 @@ make rm      # удалить контейнер
 | `TELEGRAM_BOT_TOKEN` | токен бота |
 | `TELEGRAM_USER_ID` | твой Telegram user id |
 | `GOOGLE_SPREADSHEET_ID` | ID таблицы |
-| `GOOGLE_CREDENTIALS_JSON` | содержимое `credentials.json` целиком |
+| `GOOGLE_CREDENTIALS_B64` | `credentials.json` в base64, одной строкой (см. ниже) |
 
 `GITHUB_TOKEN` создавать не нужно — он выдаётся Actions автоматически.
+
+Значение для `GOOGLE_CREDENTIALS_B64` (macOS, из корня проекта):
+
+```bash
+base64 -i credentials.json | tr -d '\n' | pbcopy
+```
+
+Именно base64 в одну строку: многострочный JSON в секрете ломается при передаче
+через SSH и приезжает на сервер пустым файлом.
 
 Директория деплоя — `/home/www/finance` (переменная `DEPLOY_DIR` в workflow). Workflow сам
 создаёт там `.env`, `credentials.json` и `docker-compose.yml`, руками туда ничего класть не надо.

@@ -82,9 +82,13 @@ jobs:
             GOOGLE_SHEETS_CREDENTIALS_PATH=credentials.json
             EOF
 
-            cat > credentials.json <<'EOF'
-            ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-            EOF
+            # base64 одной строкой: многострочный JSON через heredoc ломается
+            # на квотинге/CRLF и приезжает пустым, а бот падает уже в рантайме.
+            echo '${{ secrets.GOOGLE_CREDENTIALS_B64 }}' | base64 -d > credentials.json
+            grep -q '"private_key"' credentials.json \
+              || { echo "credentials.json пустой или не JSON — проверь секрет GOOGLE_CREDENTIALS_B64"; exit 1; }
+            grep -q '^TELEGRAM_BOT_TOKEN=.' .env \
+              || { echo ".env без токена — проверь секрет TELEGRAM_BOT_TOKEN"; exit 1; }
 
             export IMAGE="${{ needs.build.outputs.image }}:${{ github.sha }}"
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
