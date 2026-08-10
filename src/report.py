@@ -44,6 +44,13 @@ class Report:
             return None
         return self.balance / self.income * 100
 
+    @property
+    def spent_ratio(self) -> float | None:
+        """Сколько процентов доходов потрачено. Может быть больше 100 при перерасходе."""
+        if self.income <= 0:
+            return None
+        return self.expense / self.income * 100
+
 
 def period_bounds(period: str, today: date) -> tuple[date | None, date | None]:
     """Границы периода [начало, конец] включительно. None означает "без границы"."""
@@ -101,6 +108,31 @@ def format_amount(amount: float) -> str:
     return f"{amount:,.2f}".replace(",", " ")
 
 
+BAR_WIDTH = 20
+BAR_FILLED = "█"
+BAR_EMPTY = "░"
+
+
+def render_bar(percent: float, width: int = BAR_WIDTH) -> str:
+    """Полоска расходов к доходам. Заполнение обрезается по 100%, само число — нет."""
+    clamped = max(0.0, min(percent, 100.0))
+    filled = round(clamped / 100 * width)
+    return BAR_FILLED * filled + BAR_EMPTY * (width - filled)
+
+
+def _bar_lines(report: Report) -> list[str]:
+    spent = report.spent_ratio
+    if spent is None:
+        if report.expense <= 0:
+            return []
+        return [render_bar(100), "Доходов за период нет — потрачено из остатка."]
+
+    line = f"{render_bar(spent)} {spent:.0f}%"
+    if spent > 100:
+        line += f" — перерасход {format_amount(report.expense - report.income)}"
+    return [line]
+
+
 def format_report(report: Report) -> str:
     lines = [f"📊 Отчёт — {report.title}", ""]
 
@@ -116,6 +148,10 @@ def format_report(report: Report) -> str:
         f"Расходы: {format_amount(report.expense)}",
         f"Остаток: {format_amount(report.balance)}{ratio_text}",
     ]
+
+    bar = _bar_lines(report)
+    if bar:
+        lines += [""] + bar
 
     if report.expense_by_category:
         lines += ["", "Расходы по категориям:"]
