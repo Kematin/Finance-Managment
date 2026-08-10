@@ -1,0 +1,10 @@
+services:
+  bot:
+    image: ${IMAGE:-ghcr.io/kematin/finance-managment:latest}
+    container_name: personal-finance-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro

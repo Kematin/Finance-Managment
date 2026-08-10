@@ -10,4 +10,4 @@ RUN uv sync --frozen --no-install-project
 COPY . .
 RUN uv sync --frozen
 
-CMD ["uv", "run", "python", "bot.py"]
+CMD ["uv", "run", "python", "src/bot.py"]

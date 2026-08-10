@@ -27,7 +27,7 @@ cp .env.example .env
 ## Запуск
 
 ```bash
-uv run python bot.py
+uv run python src/bot.py
 ```
 
 ### Через Docker
@@ -39,14 +39,58 @@ make stop    # остановить
 make rm      # удалить контейнер
 ```
 
+## Отчётность
+
+Кнопка «📊 Отчёт» (или команда `/report`) → выбор периода (текущий месяц, прошлый месяц,
+текущий год, всё время). Бот читает лист `БД` и считает: доходы, расходы, остаток
+(доходы − расходы), остаток в % от доходов, разбивку по категориям.
+
+## Деплой (CD)
+
+Пуш в `main` → GitHub Actions собирает Docker-образ, пушит в GHCR, по SSH обновляет
+контейнер на сервере (`.github/workflows/deploy.yml`).
+
+Секреты репозитория (Settings → Secrets and variables → Actions → New repository secret):
+
+| Секрет | Значение |
+| --- | --- |
+| `SSH_HOST` | IP или домен сервера |
+| `SSH_USER` | пользователь на сервере (в группе `docker`) |
+| `SSH_KEY` | приватный SSH-ключ целиком, включая строки `-----BEGIN ... KEY-----` |
+| `SSH_PORT` | порт SSH, если не 22 (иначе секрет можно не создавать) |
+| `TELEGRAM_BOT_TOKEN` | токен бота |
+| `TELEGRAM_USER_ID` | твой Telegram user id |
+| `GOOGLE_SPREADSHEET_ID` | ID таблицы |
+| `GOOGLE_CREDENTIALS_JSON` | содержимое `credentials.json` целиком |
+
+`GITHUB_TOKEN` создавать не нужно — он выдаётся Actions автоматически.
+
+Директория деплоя — `/home/www/finance` (переменная `DEPLOY_DIR` в workflow). Workflow сам
+создаёт там `.env`, `credentials.json` и `docker-compose.yml`, руками туда ничего класть не надо.
+
+Требования к серверу:
+
+- установлены `docker` и `docker compose`;
+- публичный ключ из `SSH_KEY` лежит в `~/.ssh/authorized_keys` пользователя `SSH_USER`;
+- `SSH_USER` может писать в `/home/www/finance` и состоит в группе `docker`:
+
+```bash
+mkdir -p /home/www/finance
+chmod 700 /home/www/finance   # внутри токен бота и ключ сервис-аккаунта
+sudo usermod -aG docker $USER # перелогиниться после
+```
+
+Часовой пояс контейнера — `Europe/Moscow` (переменная `TZ` в `docker-compose.yml`);
+от неё зависит, какой месяц считается текущим в отчёте.
+
 ## Категоризация
 
-Сейчас — словарный классификатор (`categorizer.py`, `categories.py`): подстрока в тексте
+Сейчас — словарный классификатор (`src/categorizer.py`, `src/categories.py`): подстрока в тексте
 матчится на категорию. Незнакомое слово ("кола" и т.п.) не распознаётся — бот спрашивает
 категорию кнопкой.
 
 Когда словарь надоест поддерживать вручную — план подключения embeddings-классификатора
-(semantic similarity, ловит незнакомые слова автоматически) описан в конце `categorizer.py`.
+(semantic similarity, ловит незнакомые слова автоматически) описан в конце `src/categorizer.py`.
 
 ## Лицензия
 

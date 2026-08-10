@@ -2,13 +2,20 @@ import asyncio
 import re
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from categories import EXPENSE_CATEGORIES, INCOME_CATEGORIES
 from categorizer import get_categorizer
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID
+from report import PERIODS, build_report, format_amount, format_report
 from sheets import SheetsClient
 
 categorizer = get_categorizer()
@@ -28,6 +35,17 @@ AMOUNT_MULTIPLIERS = {
     "тысячи": 1000,
 }
 
+REPORT_BUTTON = "📊 Отчёт"
+
+# Префиксы callback_data: без них колбэк отчёта неотличим от выбора категории.
+CATEGORY_PREFIX = "cat:"
+PERIOD_PREFIX = "period:"
+
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=REPORT_BUTTON)]],
+    resize_keyboard=True,
+)
+
 # user_id -> {"description": str, "amount": float, "is_income": bool}
 pending: dict[int, dict] = {}
 
@@ -37,7 +55,9 @@ async def start(message: Message) -> None:
     await message.answer(
         "Пиши трату или доход в формате: <описание> <сумма>\n"
         "Например: кофе 300\n"
-        "Отрицательная сумма считается доходом."
+        "Отрицательная сумма считается доходом.\n"
+        f"Кнопка «{REPORT_BUTTON}» — сводка по доходам, расходам и остатку.",
+        reply_markup=MAIN_KEYBOARD,
     )
 
 
@@ -54,16 +74,37 @@ def parse_entry(text: str) -> tuple[str, float] | None:
     return description, amount
 
 
-def format_amount(amount: float) -> str:
-    return f"{amount:,.0f}".replace(",", " ") if amount == int(amount) else f"{amount:,.2f}".replace(",", " ")
-
-
 def build_category_keyboard(options: list[str]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for category in options:
-        builder.button(text=category, callback_data=category)
+        builder.button(text=category, callback_data=CATEGORY_PREFIX + category)
     builder.adjust(1)
     return builder.as_markup()
+
+
+def build_period_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for period, label in PERIODS.items():
+        builder.button(text=label, callback_data=PERIOD_PREFIX + period)
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+@dp.message(Command("report"))
+@dp.message(F.text == REPORT_BUTTON)
+async def ask_period(message: Message) -> None:
+    await message.answer("За какой период?", reply_markup=build_period_keyboard())
+
+
+@dp.callback_query(F.data.startswith(PERIOD_PREFIX))
+async def handle_period_choice(callback: CallbackQuery) -> None:
+    await callback.answer()
+
+    period = callback.data.removeprefix(PERIOD_PREFIX)
+    # gspread синхронный: без to_thread чтение всего листа блокирует polling.
+    entries = await asyncio.to_thread(sheets.fetch_entries)
+    report = build_report(entries, period)
+    await callback.message.edit_text(format_report(report))
 
 
 @dp.message(F.text)
@@ -108,7 +149,7 @@ async def ask_category(
     )
 
 
-@dp.callback_query()
+@dp.callback_query(F.data.startswith(CATEGORY_PREFIX))
 async def handle_category_choice(callback: CallbackQuery) -> None:
     await callback.answer()
 
@@ -117,7 +158,7 @@ async def handle_category_choice(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Эта запись уже устарела, начни заново.")
         return
 
-    category = callback.data
+    category = callback.data.removeprefix(CATEGORY_PREFIX)
     if entry["is_income"]:
         sheets.add_income(entry["description"], entry["amount"], category)
     else:
