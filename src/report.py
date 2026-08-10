@@ -9,6 +9,8 @@ from datetime import date, timedelta
 
 from sheets import Entry, TYPE_EXPENSE, TYPE_INCOME
 
+CURRENCY = "₽"
+
 MONTH_NAMES = [
     "январь", "февраль", "март", "апрель", "май", "июнь",
     "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
@@ -36,13 +38,6 @@ class Report:
     def balance(self) -> float:
         """Остаток на счету за период: доходы минус расходы."""
         return self.income - self.expense
-
-    @property
-    def balance_ratio(self) -> float | None:
-        """Остаток в процентах от доходов. None, если доходов за период не было."""
-        if self.income <= 0:
-            return None
-        return self.balance / self.income * 100
 
     @property
     def spent_ratio(self) -> float | None:
@@ -103,9 +98,9 @@ def build_report(entries: list[Entry], period: str, today: date | None = None) -
 
 
 def format_amount(amount: float) -> str:
-    if amount == int(amount):
-        return f"{amount:,.0f}".replace(",", " ")
-    return f"{amount:,.2f}".replace(",", " ")
+    """Сумма с валютой. Единая точка форматирования денег — и в отчёте, и в боте."""
+    formatted = f"{amount:,.0f}" if amount == int(amount) else f"{amount:,.2f}"
+    return f"{formatted.replace(',', ' ')} {CURRENCY}"
 
 
 BAR_WIDTH = 20
@@ -140,13 +135,10 @@ def format_report(report: Report) -> str:
         lines.append("За этот период записей нет.")
         return "\n".join(lines)
 
-    ratio = report.balance_ratio
-    ratio_text = f" ({ratio:.0f}% от доходов)" if ratio is not None else ""
-
     lines += [
         f"Доходы:  {format_amount(report.income)}",
         f"Расходы: {format_amount(report.expense)}",
-        f"Остаток: {format_amount(report.balance)}{ratio_text}",
+        f"Остаток: {format_amount(report.balance)}",
     ]
 
     bar = _bar_lines(report)
