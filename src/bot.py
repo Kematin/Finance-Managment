@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import re
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -15,6 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from categories import EXPENSE_CATEGORIES, INCOME_CATEGORIES
 from categorizer import get_categorizer
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID
+from pinned import refresh_pinned, run_daily_updates
 from report import PERIODS, build_report, format_amount, format_report
 from sheets import SheetsClient
 
@@ -108,7 +111,7 @@ async def handle_period_choice(callback: CallbackQuery) -> None:
 
 
 @dp.message(F.text)
-async def handle_message(message: Message) -> None:
+async def handle_message(message: Message, bot: Bot) -> None:
     parsed = parse_entry(message.text)
     if parsed is None:
         await message.answer("Не понял. Формат: <описание> <сумма>, например: кофе 300")
@@ -129,6 +132,7 @@ async def handle_message(message: Message) -> None:
 
     sheets.add_expense(description, amount, category)
     await message.answer(f"Записал: {description} — {format_amount(amount)} — {category}")
+    await refresh_pinned(bot, sheets, TELEGRAM_USER_ID)
 
 
 async def ask_category(
@@ -150,7 +154,7 @@ async def ask_category(
 
 
 @dp.callback_query(F.data.startswith(CATEGORY_PREFIX))
-async def handle_category_choice(callback: CallbackQuery) -> None:
+async def handle_category_choice(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer()
 
     entry = pending.get(callback.from_user.id)
@@ -168,11 +172,21 @@ async def handle_category_choice(callback: CallbackQuery) -> None:
         f"Записал: {entry['description']} — {format_amount(entry['amount'])} — {category}"
     )
     pending.pop(callback.from_user.id, None)
+    await refresh_pinned(bot, sheets, TELEGRAM_USER_ID)
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    await dp.start_polling(bot)
+
+    # Ссылку на задачу держим: задача без ссылок может быть собрана сборщиком мусора.
+    daily_updates = asyncio.create_task(run_daily_updates(bot, sheets, TELEGRAM_USER_ID))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        daily_updates.cancel()
+        with suppress(asyncio.CancelledError):
+            await daily_updates
 
 
 if __name__ == "__main__":

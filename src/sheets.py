@@ -11,6 +11,11 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DB_SHEET = "БД"
 HEADER_ROW = ["Дата", "Описание", "Сумма", "Категория", "Тип"]
 
+# Служебный лист с парами ключ-значение: состояние бота, которое должно пережить
+# перезапуск контейнера (у него нет своего тома).
+STATE_SHEET = "Состояние"
+STATE_HEADER = ["Ключ", "Значение"]
+
 TYPE_EXPENSE = "Расход"
 TYPE_INCOME = "Доход"
 
@@ -49,22 +54,22 @@ class SheetsClient:
         creds = Credentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_PATH, scopes=SCOPES)
         self._client = gspread.authorize(creds)
         self._spreadsheet = self._client.open_by_key(GOOGLE_SPREADSHEET_ID)
-        self._sheet = self._get_or_create_sheet(DB_SHEET)
-
-    def _get_or_create_sheet(self, title: str) -> gspread.Worksheet:
-        try:
-            sheet = self._spreadsheet.worksheet(title)
-        except gspread.WorksheetNotFound:
-            sheet = self._spreadsheet.add_worksheet(title=title, rows=1000, cols=len(HEADER_ROW))
-            sheet.append_row(HEADER_ROW)
+        self._sheet = self._get_or_create_sheet(DB_SHEET, HEADER_ROW, rows=1000)
 
         # Числовой формат колонок задаём отдельно от записи строк (не через
         # value_input_option="USER_ENTERED" на всю строку) — иначе Sheets
         # начинает "по-умному" интерпретировать и текстовые колонки тоже
         # (категория, тип), что и сломало категории в прошлый раз.
-        sheet.format("A2:A1000", {"numberFormat": {"type": "DATE", "pattern": "dd.mm.yyyy"}})
-        sheet.format("C2:C1000", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0.##"}})
-        return sheet
+        self._sheet.format("A2:A1000", {"numberFormat": {"type": "DATE", "pattern": "dd.mm.yyyy"}})
+        self._sheet.format("C2:C1000", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0.##"}})
+
+    def _get_or_create_sheet(self, title: str, header: list[str], rows: int) -> gspread.Worksheet:
+        try:
+            return self._spreadsheet.worksheet(title)
+        except gspread.WorksheetNotFound:
+            sheet = self._spreadsheet.add_worksheet(title=title, rows=rows, cols=len(header))
+            sheet.append_row(header)
+            return sheet
 
     def _add_row(self, description: str, amount: float, category: str, entry_type: str) -> None:
         row_date = _to_sheets_serial_date(date.today())
@@ -104,3 +109,21 @@ class SheetsClient:
                 )
             )
         return entries
+
+    def get_state(self) -> dict[str, str]:
+        """Служебные пары ключ-значение. Лист создаётся лениво, поэтому его
+        отсутствие — не ошибка, а просто пустое состояние."""
+        try:
+            sheet = self._spreadsheet.worksheet(STATE_SHEET)
+        except gspread.WorksheetNotFound:
+            return {}
+
+        rows = sheet.get_values()
+        return {str(row[0]): str(row[1]) for row in rows[1:] if len(row) >= 2 and row[0]}
+
+    def save_state(self, values: dict[str, str]) -> None:
+        """Перезаписывает служебный лист целиком: состояние маленькое и всегда
+        пишется полным набором ключей."""
+        sheet = self._get_or_create_sheet(STATE_SHEET, STATE_HEADER, rows=10)
+        sheet.clear()
+        sheet.update([STATE_HEADER] + [[key, value] for key, value in values.items()])
